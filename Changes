@@ -1,0 +1,6 @@
+Revision history for Perl extension AI::NeuralNet::Kohonen.
+
+0.01  Thu Mar 13 12:32:00 2003
+	- original version; created by h2xs 1.21 with options
+		-X -n AI::NeuralNet::Kohonen
+

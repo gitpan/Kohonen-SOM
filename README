@@ -1,0 +1,31 @@
+AI/NeuralNet/Kohonen version 0.01
+=================================
+
+An illustrative implimentation of Kohonen's Self-organising Feature Maps
+(SOMs) in Perl.
+
+It's not fast - it's illustrative.
+
+In fact, it's slow: but it's illustrative....
+
+INSTALLATION
+
+To install this module type the following:
+
+   perl Makefile.PL
+   make
+   make test
+   make install
+
+DEPENDENCIES
+
+This module requires these other modules and libraries:
+
+   AI::NeuralNet::Kohonen::Node
+
+COPYRIGHT AND LICENCE
+
+This implimentation Copyright (C) Lee Goddard, 2003.
+All Rights Reserved.
+
+Available under the same terms as Perl itself.
