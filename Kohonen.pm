@@ -1,7 +1,7 @@
 package AI::NeuralNet::Kohonen;
 
 use vars qw/$VERSION $TRACE/;
-$VERSION = 0.11;	# 13 March 2003
+$VERSION = 0.12;	# 13 March 2003
 $TRACE = 1;
 
 =head1 NAME
@@ -42,6 +42,7 @@ use AI::NeuralNet::Kohonen::Node;
 	$_->tk_dump;
 	exit;
 
+
 =head1 DESCRIPTION
 
 An illustrative implimentation of Kohonen's Self-organising Feature Maps (SOMs)
@@ -64,11 +65,19 @@ None
 
 None
 
+
 =head1 CONSTRUCTOR new
 
-Sets up object fields:
+Instantiates object fields:
 
 =over 4
+
+=item input_file
+
+A I<SOM_PAK> training file to load. This does not prevent
+other input methods (C<input>, C<table>) being processed, but
+it does over-ride any specifications (C<weight_dim>) which may
+have been explicitly handed to the constructor.
 
 =item input
 
@@ -118,6 +127,16 @@ Reference to code to call at the end of every epoch
 
 Reference to code to call at the end of training.
 
+=item targeting
+
+If undefined, random targets are chosen; otherwise
+they're iterated over. Just for experimental purposes.
+
+=item smoothing
+
+The amount of smoothing to apply by default when C<smooth>
+is applied (see L</METHOD smooth>).
+
 =back
 
 Private fields:
@@ -149,11 +168,15 @@ sub new {
 	my %args			= @_;
 	my $self 			= bless \%args,$class;
 	$self->_process_table if defined $self->{table};	# Creates {input}
+	$self->load_file($self->{input_file}) if defined $self->{input_file};	# Creates {input}
 	if (not defined $self->{input}){
 		cluck "No {input} supplied!";
 		return undef;
 	}
-	$self->{weight_dim}		= $#{$self->{input}->[0]};
+	# Error check this, not ignore
+	if (not $self->{input_file}){
+		$self->{weight_dim}		= $#{$self->{input}->[0]};
+	}
 	$self->{map_dim_x}		= 19 unless defined $self->{map_dim_x};
 	$self->{map_dim_y}		= 19 unless defined $self->{map_dim_y};
 	# Legacy from...yesterday
@@ -357,67 +380,70 @@ sub dump { my $self=shift;
 	}
 }
 
+=head1 METHOD smooth
 
-=head1 METHOD tk_dump;
+Perform gaussian smoothing upon the map.
 
-Dumps the weights to a TK screen.
+Accepts: the length of the side of the square gaussian mask to apply.
+If not supplied, uses the value in the field C<smoothing>; if that is
+empty, uses the square root of the average of the map dimensions
+(C<map_dim_a>).
+
+Returns: a true value.
 
 =cut
 
-sub tk_dump { my $self=shift;
-	$self->{display_scale} = 10;
-	eval "
-		use Tk;
-		use Tk::Canvas;
-	";
-	my $mw = MainWindow->new(
-		-width	=> ($self->{map_dim_x} * $self->{display_scale})+100,
-		-height	=> ($self->{map_dim_y} * $self->{display_scale})+100,
-	);
-	my $c = $mw->Canvas(
-		-width	=> ($self->{map_dim_x} * $self->{display_scale})+50,
-		-height	=> ($self->{map_dim_y} * $self->{display_scale})+50,
-	);
+sub smooth { my ($self,$smooth) = (shift,shift);
+	$smooth = $self->{smoothing} if not $smooth and defined $self->{smoothing};
+	$smooth = int( sqrt $self->{map_dim_a} );
+	my $mask = _make_gaussian_mask($smooth);
 
+	# For every weight at every point
 	for my $x (0..$self->{map_dim_x}){
 		for my $y (0..$self->{map_dim_y}){
-			my $colour = sprintf("#%02x%02x%02x",
-				(int (255 * $self->{map}->[$x]->[$y]->{weight}->[0])),
-				(int (255 * $self->{map}->[$x]->[$y]->{weight}->[1])),
-				(int (255 * $self->{map}->[$x]->[$y]->{weight}->[2])),
-			);
-			$c->create(
-				rectangle	=> [
-					(1+$x)*$self->{display_scale} ,
-					(1+$y)*$self->{display_scale} ,
-					(1+$x)*($self->{display_scale})+$self->{display_scale} ,
-					(1+$y)*($self->{display_scale})+$self->{display_scale}
-				],
-				-outline	=> "black",
-				-fill 		=> $colour,
-			);
+			for my $w (0..$self->{weight_dim}){
+				# Apply the mask
+				for my $mx (0..$smooth){
+					for my $my (0..$smooth){
+						$self->{map}->[$x]->[$y]->{weight}->[$w] *= $mask->[$mx]->[$my];
+					}
+				}
+			}
 		}
 	}
-	$c->pack();
-	eval "
-		MainLoop;
-	";
 	return 1;
 }
 
 
+=head1 METHOD tk_dump;
+
+Extended and moved to the package C<AI::NeuralNet::Kohonen::Demo::RGB>.
+
+=cut
+
+
 =head1 PRIVATE METHOD _select_target
 
-Return a random target from the training set in the C<input> field.
+Return a random target from the training set in the C<input> field,
+unless the C<targeting> field is defined, when the targets are
+iterated over.
 
 =cut
 
 sub _select_target { my $self=shift;
-	return $self->{input}->[
-		(int rand(scalar @{$self->{input}}))
-	];
+	if (not $self->{targeting}){
+		return $self->{input}->[
+			(int rand(scalar @{$self->{input}}))
+		];
+	}
+	else {
+		$self->{tar}++;
+		if ($self->{tar}>=$#{ $self->{input} }){
+			$self->{tar} = 0;
+		}
+		return $self->{input}->[$self->{tar}];
+	}
 }
-
 
 
 =head1 PRIVATE METHOD _adjust_neighbours_of
@@ -458,6 +484,7 @@ sub _adjust_neighbours_of { my ($self,$bmu,$target) = (shift,shift,shift);
 	my $neighbour_radius = int (
 		($self->{map_dim_a}/2) * exp(- $self->{t} / $self->{time_constant})
 	);
+
 	# Distance from co-ord vector (0,0) as integer
 	# Basically map_width * y  +  x
 	my $centre = ($self->{map_dim_a}*$bmu->[2])+$bmu->[1];
@@ -484,27 +511,6 @@ sub _adjust_neighbours_of { my ($self,$bmu,$target) = (shift,shift,shift);
 }
 
 
-# Poor: selects a square around the bmu
-sub SQUARE_adjust_neighbours_of { my ($self,$bmu,$target) = (shift,shift,shift);
-	my $neighbour_radius = int (
-		($self->{map_dim}/2) * exp(- $self->{t} / $self->{time_constant})
-	);
-	for my $x ($bmu->[1]-$neighbour_radius .. $bmu->[1]+$neighbour_radius){
-		next if $x<0 or $x>$self->{map_dim_x};
-		for my $y ($bmu->[2]-$neighbour_radius .. $bmu->[2]+$neighbour_radius){
-			next if $y<0 or $y>$self->{map_dim_y};
-			# Adjust the weight
-			for my $w (0..$self->{weight_dim}){
-				my $weight = \$self->{map}->[$x]->[$y]->{weight}->[$w];
-				$$weight = $$weight + (
-					$self->{map}->[$x]->[$y]->distance_effect($bmu->[0], $neighbour_radius)
-					* ( $self->{l} * ($target->[$w] - $$weight) )
-				);
-			}
-		}
-	}
-}
-
 =head1 PRIVATE METHOD _decay_learning_rate
 
 Performs a gaussian decay upon the learning rate (our C<l> field).
@@ -519,6 +525,180 @@ sub _decay_learning_rate { my $self=shift;
 	$self->{l} =  (
 		$self->{learning_rate} * exp(- $self->{t} / $self->{time_constant})
 	);
+}
+
+
+=head1 PRIVATE FUNCTION _make_gaussian_mask
+
+Accepts: size of mask.
+
+Returns: reference to a 2d array that is the mask.
+
+=cut
+
+sub _make_gaussian_mask { my ($smooth) = (shift);
+	my $f = 4; # Cut-off threshold
+	my $g_mask_2d = [];
+	for my $x (0..$smooth){
+		$g_mask_2d->[$x] = [];
+		for my $y (0..$smooth){
+			$g_mask_2d->[$x]->[$y] =
+				_gauss_weight( $x-($smooth/2), $smooth/$f)
+			  * _gauss_weight( $y-($smooth/2), $smooth/$f );
+		}
+	}
+	return $g_mask_2d;
+}
+
+=head1 PRIVATE FUNCTION _gauss_weight
+
+Accepts: two paramters: the first, C<r>, gives the distance from the mask centre,
+the second, C<sigma>, specifies the width of the mask.
+
+Returns the gaussian weight.
+
+See also L<_decay_learning_rate>.
+
+=cut
+
+sub _gauss_weight { my ($r, $sigma) = (shift,shift);
+	return exp( -($r**2) / (2 * $sigma**2) );
+}
+
+
+=head1 FILE FORMAT
+
+I<SOM_PAK> file format version 3.1 (April 7, 1995),
+Helsinki University of Technology, Espoo:
+
+=over 4
+
+The input data is stored in ASCII-form as a list of entries, one line
+...for each vectorial sample.
+
+The first line of the file is reserved for status knowledge of the
+entries; in the present version it is used to define the following
+items (these items MUST occur in the indicated order):
+
+   - Dimensionality of the vectors (integer, compulsory).
+   - Topology type, either hexa or rect (string, optional, case-sensitive).
+   - Map dimension in x-direction (integer, optional).
+   - Map dimension in y-direction (integer, optional).
+   - Neighborhood type, either bubble or gaussian (string, optional, case-sen-
+      sitive).
+
+...
+
+Subsequent lines consist of n floating-point numbers followed by an
+optional class label (that can be any string) and two optional
+qualifiers (see below) that determine the usage of the corresponding
+data entry in training programs.  The data files can also contain an
+arbitrary number of comment lines that begin with '#', and are
+ignored. (One '#' for each comment line is needed.)
+
+If some components of some data vectors are missing (due to data
+collection failures or any other reason) those components should be
+marked with 'x'...[in processing, these] are ignored.
+
+=back
+
+Not implimented (yet):
+
+	I<neighbourhood type>, which is always gaussian.
+	i<x> for missing data.
+	class labels
+	the two optional qualifiers
+
+=back
+
+Requires: a path to a file.
+
+Returns C<undef> on failure.
+
+=cut
+
+sub load_file { my ($self,$path) = (shift,shift);
+	local *IN;
+	if (not open IN,$path){
+		warn "Could not open file <$path>: $!";
+		return undef;
+	}
+	@_ = <IN>;
+	close IN;
+	chomp @_;
+	my @specs = split/\s+/,(shift @_);
+	#- Dimensionality of the vectors (integer, compulsory).
+	$self->{weight_dim} = shift @specs;
+	$self->{weight_dim}--; # Perl indexing
+	#- Topology type, either hexa or rect (string, optional, case-sensitive).
+	$self->{display}    = shift @specs;
+	if (not defined $self->{display}){
+
+	} elsif ($self->{display} eq 'hexa'){
+		$self->{display} = 'hex'
+	} elsif ($self->{display} eq 'rect'){
+		$self->{display} = undef;
+	} else {
+		warn "Unknown display option '$self->{display}' in file <$path> - defaulting.";
+		$self->{display} = undef;
+	}
+	#- Map dimension in x-direction (integer, optional).
+	$self->{map_dim_x}    = shift @specs;
+	#- Map dimension in y-direction (integer, optional).
+	$self->{map_dim_y}    = shift @specs;
+	#- Neighborhood type, either bubble or gaussian (string, optional, case-sen- sitive).
+	# not implimented
+
+	# Format input data
+	foreach (@_){
+		s/#.*$//g;
+		next if /^$/;
+		my @i = split /\s+/;
+		push @{$self->{input}}, \@i;
+	}
+	return 1;
+}
+
+=head1 METHOD save_file
+
+Saves the map file in I<SOM_PAK> format (see L<METHOD load_file>)
+at the path specified in the first argument.
+
+Return C<undef> on failure, a true value on success.
+
+=cut
+
+sub save_file { my ($self,$path) = (shift,shift);
+	local *OUT;
+	if (not open OUT,">$path"){
+		warn "Could not open file for writing <$path>: $!";
+		return undef;
+	}
+	#- Dimensionality of the vectors (integer, compulsory).
+	print OUT ($self->{weight_dim}+1)," ";	# Perl indexing
+	#- Topology type, either hexa or rect (string, optional, case-sensitive).
+	if (not defined $self->{display}){
+		print OUT "rect ";
+	} else { # $self->{display} eq 'hex'
+		print OUT "hexa ";
+	}
+	#- Map dimension in x-direction (integer, optional).
+	print OUT $self->{map_dim_x}." ";
+	#- Map dimension in y-direction (integer, optional).
+	print OUT $self->{map_dim_y}." ";
+	#- Neighborhood type, either bubble or gaussian (string, optional, case-sen- sitive).
+	print OUT "gaussian ";
+	# End of header
+	print OUT "\n";
+
+	# Format input data
+	foreach (@{$self->{input}}){
+		print OUT join("\t",@$_),"\n";
+	}
+	# EOF
+	print OUT chr 26;
+	close OUT;
+	return 1;
 }
 
 

@@ -1,7 +1,7 @@
 package K_test;
 use lib "../..";
 use Test;
-BEGIN { plan test => 19}
+BEGIN { plan test => 26}
 
 use AI::NeuralNet::Kohonen;
 ok(1,1);
@@ -68,9 +68,17 @@ foreach (@_){
 
 ok(1,1);
 
+$_ = AI::NeuralNet::Kohonen->new(
+	epochs	=> 10,
+	input_file => 'ex.dat'
+);
+ok(ref $_,'AI::NeuralNet::Kohonen');
+ok( ref $_->{input}, 'ARRAY');
+ok( scalar @{$_->{input}}, 3840);
+ok ($_->{input}->[$#{$_->{input}}]->[4], 406.918518);
+ok ($_->train,1);
+my $filename = substr(time,0,8);
+ok ($_->save_file($filename),1);
+ok (unlink($filename),1);
 __END__
 
-1 1 0
-1 0 1
-0 1 1
-1 1 1

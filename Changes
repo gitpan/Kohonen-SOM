@@ -1,5 +1,9 @@
 Revision history for Perl extension AI::NeuralNet::Kohonen.
 
+0.012 Fri Mar 14 11:49:00 2003
+	Added some support for loading and saving in SOM_PAK file
+	format; gaussian smoothing of the map.
+
 0.011 Thu Mar 13 14:00:01 2003
 	Had forgotten to make the find_bmu method public.
 	Allowed for rectangular maps rather than just square.
