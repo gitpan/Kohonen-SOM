@@ -1,8 +1,7 @@
 package AI::NeuralNet::Kohonen;
 
-use vars qw/$VERSION $TRACE/;
-$VERSION = 0.12;	# 13 March 2003
-$TRACE = 1;
+use vars qw/$VERSION/;
+$VERSION = 0.132;	# 16 April 2003 - deprecated syntax fix
 
 =head1 NAME
 
@@ -12,9 +11,10 @@ AI::NeuralNet::Kohonen - Kohonen's Self-organising Maps
 
 use strict;
 use warnings;
-use Carp qw/croak cluck/;
+use Carp qw/croak cluck confess/;
 
 use AI::NeuralNet::Kohonen::Node;
+use AI::NeuralNet::Kohonen::Input;
 
 =head1 SYNOPSIS
 
@@ -33,33 +33,27 @@ use AI::NeuralNet::Kohonen::Node;
 	1 1 1
 	");
 
-	$_->dump;
-	$_->tk_dump;
-
 	$_->train;
-
-	$_->dump;
-	$_->tk_dump;
+	$_->save_file('mydata.txt');
 	exit;
-
 
 =head1 DESCRIPTION
 
 An illustrative implimentation of Kohonen's Self-organising Feature Maps (SOMs)
-in Perl.
+in Perl. It's not fast - it's illustrative. In fact, it's slow: but it is illustrative....
 
-It's not fast - it's illustrative.
+Have a look at L<AI::NeuralNet::Kohonen::Demo::RGB> for an example of
+visualisation of the map.
 
-In fact, it's slow: but it's illustrative....
-
-Have a look at L<AI::NeuralNet::Kohonen::Demo::RGB>.
+This module has not yet been tested for accuracy, and should be
+considered alpha - everything may change.
 
 I'll add some more text here later.
 
-
 =head1 DEPENDENCIES
 
-None
+	AI::NeuralNet::Kohonen::Node
+	AI::NeuralNet::Kohonen::Input
 
 =head1 EXPORTS
 
@@ -79,6 +73,8 @@ other input methods (C<input>, C<table>) being processed, but
 it does over-ride any specifications (C<weight_dim>) which may
 have been explicitly handed to the constructor.
 
+See also L</FILE FORMAT> and L</METHOD load_input>.
+
 =item input
 
 A reference to an array of training vectors, within which each vector
@@ -90,10 +86,8 @@ See also C<table>.
 
 =item table
 
-A scalar that is a table, lines delimited by
-C<[\r\f\n]+>, columns by whitespace, initial whitespace stripped.
-First line should be column names, the following lines should be just data.
-See also C<input>.
+The contents of a file of the format that could be supplied to
+the C<input_file> field.
 
 =item input_names
 
@@ -118,6 +112,11 @@ The initial learning rate.
 
 Reference to code to call at the begining of training.
 
+=item epoch_start
+
+Reference to code to call at the begining of every epoch
+(such as a colour calibration routine).
+
 =item epoch_end
 
 Reference to code to call at the end of every epoch
@@ -136,6 +135,18 @@ they're iterated over. Just for experimental purposes.
 
 The amount of smoothing to apply by default when C<smooth>
 is applied (see L</METHOD smooth>).
+
+=item neighbour_factor
+
+When working out the size of the neighbourhood of influence,
+the average of the dimensions of the map are divided by this variable,
+before the exponential function is applied: the default value is 2.5,
+but you may with to use 2 or 4.
+
+=item missing_mask
+
+Used to signify data is missing in an input vector. Defaults
+to C<x>.
 
 =back
 
@@ -164,86 +175,136 @@ Average of the map dimensions.
 =cut
 
 sub new {
-	my $class			= shift;
-	my %args			= @_;
-	my $self 			= bless \%args,$class;
+	my $class					= shift;
+	my %args					= @_;
+	my $self 					= bless \%args,$class;
+
+	$self->{missing_mask}		= 'x' unless defined $self->{missing_mask};
 	$self->_process_table if defined $self->{table};	# Creates {input}
-	$self->load_file($self->{input_file}) if defined $self->{input_file};	# Creates {input}
+	$self->load_input($self->{input_file}) if defined $self->{input_file};	# Creates {input}
 	if (not defined $self->{input}){
 		cluck "No {input} supplied!";
 		return undef;
 	}
-	# Error check this, not ignore
-	if (not $self->{input_file}){
-		$self->{weight_dim}		= $#{$self->{input}->[0]};
-	}
-	$self->{map_dim_x}		= 19 unless defined $self->{map_dim_x};
-	$self->{map_dim_y}		= 19 unless defined $self->{map_dim_y};
+
+	$self->{map_dim_x}			= 19 unless defined $self->{map_dim_x};
+	$self->{map_dim_y}			= 19 unless defined $self->{map_dim_y};
 	# Legacy from...yesterday
 	if ($self->{map_dim}){
-		$self->{map_dim_x} = $self->{map_dim_y} = $self->{map_dim}
+		$self->{map_dim_x} 		= $self->{map_dim_y} = $self->{map_dim}
 	}
+	if (not defined $self->{map_dim_x} or $self->{map_dim_x}==0
+	 or not defined $self->{map_dim_y} or $self->{map_dim_y}==0){
+		 confess "No map dimensions in the input!";
+	 }
 	if ($self->{map_dim_x}>$self->{map_dim_y}){
-		$self->{map_dim_a} = $self->{map_dim_y} + (($self->{map_dim_x}-$self->{map_dim_y})/2)
+		$self->{map_dim_a} 		= $self->{map_dim_y} + (($self->{map_dim_x}-$self->{map_dim_y})/2)
 	} else {
-		$self->{map_dim_a} = $self->{map_dim_x} + (($self->{map_dim_y}-$self->{map_dim_x})/2)
+		$self->{map_dim_a} 		= $self->{map_dim_x} + (($self->{map_dim_y}-$self->{map_dim_x})/2)
 	}
-	$self->{epochs}			= 99 unless defined $self->{epochs};
-	$self->{time_constant}	= $self->{epochs} / log($self->{map_dim_a});	# to base 10?
-	$self->{learning_rate}	= 0.5 unless $self->{learning_rate};
-	$self->{l}				= $self->{learning_rate};
-	$self->_create_map;
+	$self->{neighbour_factor}	= 2.5 unless $self->{neighbour_factor};
+	$self->{epochs}				= 99 unless defined $self->{epochs};
+	$self->{time_constant}		= $self->{epochs} / log($self->{map_dim_a}) unless $self->{time_constant};	# to base 10?
+	$self->{learning_rate}		= 0.5 unless $self->{learning_rate};
+	$self->{l}					= $self->{learning_rate};
+	if (not $self->{weight_dim}){
+		cluck "{weight_dim} not set";
+		return undef;
+	}
+	$self->randomise_map;
 	return $self;
 }
 
 
-#
-# Processes the 'table' paramter to the constructor
-#
-sub _process_table { my $self = shift;
-	die "Accepts just a scalar" if $#_>0 or ref $_[0];
-	my @input;
-	my ($input,@table) = split /[\n\r\f]+/,$self->{table};
-	undef $self->{table};
-	@{$self->{input_names}} = split /\s+/,$input;
-	while (my $i = shift @table){
-		my @i = split /\s+/,$i;
-		push @{$self->{input}}, \@i;
-	}
-}
 
 
-#
-# PRIVATE METHOD _create_map
-#
-# Populates the map with nodes that contain random nubmers.
-#
-sub _create_map { my $self=shift;
-	croak "{weight_dim} not set" unless $self->{weight_dim};
-	croak "{map_dim_x} not set" unless $self->{map_dim_x};
-	croak "{map_dim_y} not set" unless $self->{map_dim_y};
+=head1 METHOD randomise_map
+
+Populates the C<map> with nodes that contain random real nubmers.
+
+See L<AI::NerualNet::Kohonen::Node/CONSTRUCTOR new>.
+
+=cut
+
+sub randomise_map { my $self=shift;
+	confess "{weight_dim} not set" unless $self->{weight_dim};
+	confess "{map_dim_x} not set" unless $self->{map_dim_x};
+	confess "{map_dim_y} not set" unless $self->{map_dim_y};
 	for my $x (0..$self->{map_dim_x}){
 		$self->{map}->[$x] = [];
 		for my $y (0..$self->{map_dim_y}){
 			$self->{map}->[$x]->[$y] = new AI::NeuralNet::Kohonen::Node(
-				dim => $self->{weight_dim}
+				dim => $self->{weight_dim},
+				missing_mask => $self->{missing_mask},
 			);
 		}
 	}
 }
 
 
+=head1 METHOD clear_map
+
+As L<METHOD randomise_map> but sets all C<map> nodes to
+either the value supplied as the only paramter, or C<undef>.
+
+=cut
+
+sub clear_map { my $self=shift;
+	confess "{weight_dim} not set" unless $self->{weight_dim};
+	confess "{map_dim_x} not set" unless $self->{map_dim_x};
+	confess "{map_dim_y} not set" unless $self->{map_dim_y};
+	my $val = shift || $self->{missing_mask};
+	my $w = [];
+	foreach (0..$self->{weight_dim}){
+		push @$w, $val;
+	}
+	for my $x (0..$self->{map_dim_x}){
+		$self->{map}->[$x] = [];
+		for my $y (0..$self->{map_dim_y}){
+			$self->{map}->[$x]->[$y] = new AI::NeuralNet::Kohonen::Node(
+				weight		 => $w,
+				dim 		 => $self->{weight_dim},
+				missing_mask => $self->{missing_mask},
+			);
+		}
+	}
+}
+
+
+
+
 =head1 METHOD train
 
 Optionally accepts a parameter that is the number of epochs
-to train for - default is the value in the C<epochs> field.
+for which to train: the default is the value in the C<epochs> field.
 
-For every C<epoch>, iterates:
+An epoch is composed of A number of generations, the number being
+the total number of input vectors.
 
-	- selects a random target from the input array;
-	- finds the best bmu
-	- adjusts neighbours of the bmu
-	- decays the learning rate
+For every generation, iterates:
+
+=over 4
+
+=item 1
+
+selects a target from the input array (see L</PRIVATE METHOD _select_target>);
+
+=item 2
+
+finds the best-matching unit (see L</METHOD find_bmu>);
+
+=item 3
+
+adjusts the neighbours of the BMU (see L</PRIVATE METHOD _adjust_neighbours_of>);
+
+=back
+
+At the end of every generation, the learning rate is decayed
+(see L</PRIVATE METHOD _decay_learning_rate>).
+
+See C<CONSTRUCTOR new> for details of applicable callbacks.
+
+Returns a true value.
 
 =cut
 
@@ -252,9 +313,12 @@ sub train { my ($self,$epochs) = (shift,shift);
 	&{$self->{train_start}} if exists $self->{train_start};
 	for my $epoch (0..$epochs){
 		$self->{t} = $epoch;
-		my $target = $self->_select_target;
-		my $bmu = $self->find_bmu($target);
-		$self->_adjust_neighbours_of($bmu,$target);
+		&{$self->{epoch_start}} if exists $self->{epoch_start};
+		for (0..$#{$self->{input}}){
+			my $target = $self->_select_target;
+			my $bmu = $self->find_bmu($target);
+			$self->_adjust_neighbours_of($bmu,$target);
+		}
 		$self->_decay_learning_rate;
 		&{$self->{epoch_end}} if exists $self->{epoch_end};
 	}
@@ -265,7 +329,8 @@ sub train { my ($self,$epochs) = (shift,shift);
 
 =head1 METHOD find_bmu
 
-Find the Best Matching Unit in the map and return the x/y index.
+For a specific taraget, finds the Best Matching Unit in the map
+and return the x/y index.
 
 Accepts: a reference to an array that is the target.
 
@@ -278,13 +343,9 @@ perhaps be abstracted as an object in its own right), indexed as follows:
 
 euclidean distance from the supplied target
 
-=item 1
+=item 1, 2
 
-I<x> co-ordinate in the map
-
-=item 2
-
-I<y> co-ordinate in the map
+I<x> and I<y> co-ordinate in the map
 
 =back
 
@@ -323,36 +384,63 @@ sub get_weight_at { my ($self,$x,$y) = (shift,shift,shift);
 	return $self->{map}->[$x]->[$y]->{weight};
 }
 
-=head1 PRIVATE METHOD find_bmu
-
-Depreciated - should have been public to begin with.
-
-=cut
-
-sub _find_bmu { return find_bmu(@_) }
 
 
 =head1 METHOD get_results
 
-Finds and returns the results for all input vectors (C<input>),
-placing the values in the array reference that is the C<results>
-field, and, depending on calling context, returning it either as
-an array or as it is.
+Finds and returns the results for all input vectors in the supplied
+reference to an array of arrays,
+placing the values in the C<results> field (array reference),
+and, returning it either as an array or as it is, depending on
+the calling context
+
+If no array reference of input vectors is supplied, will use
+the values in the C<input> field.
 
 Individual results are in the array format as described in
 L<METHOD find_bmu>.
 
 See L<METHOD find_bmu>, and L</METHOD get_weight_at>.
 
+=cut
+
+sub get_results { my ($self,$targets)=(shift,shift);
+	$self->{results} = [];
+	if (not defined $targets){
+		$targets = $self->{input};
+	} elsif (not $targets eq $self->{input}){
+		foreach (@$targets){
+			next if ref $_ eq 'AI::NeuralNet::Kohonen::Input';
+			$_ = new AI::NeuralNet::Kohonen::Input(values=>$_);
+		}
+	}
+	foreach my $target (@{ $targets}){
+		$_ = $self->find_bmu($target);
+		push @$_, $target->{class}||"?";
+		push @{$self->{results}}, $_;
+	}
+	# Make it a scalar if it's a scalar
+	if ($#{$self->{results}} == 0){
+		$self->{results} = @{$self->{results}}[0];
+	}
+	return wantarray? @{$self->{results}} : $self->{results};
+}
+
+
+=head1 METHOD map_results
+
+Clears the C<map> and fills it with the results.
+
+The sole paramter is passed to the L<METHOD clear_map>.
+L<METHOD get_results> is then called, and the results
+returned fed into the object field C<map>.
+
+This may change, as it seems misleading to re-use that field.
 
 =cut
 
-sub get_results { my $self=shift;
-	$self->{results} = [];
-	foreach my $target (@{ $self->{input} }){
-		push @{$self->{results}}, $self->find_bmu($target);
-	}
-	return wantarray? @{$self->{results}} : $self->{results};
+sub map_results { my $self=shift;
+
 }
 
 
@@ -395,6 +483,7 @@ Returns: a true value.
 
 sub smooth { my ($self,$smooth) = (shift,shift);
 	$smooth = $self->{smoothing} if not $smooth and defined $self->{smoothing};
+	return unless $smooth;
 	$smooth = int( sqrt $self->{map_dim_a} );
 	my $mask = _make_gaussian_mask($smooth);
 
@@ -415,11 +504,125 @@ sub smooth { my ($self,$smooth) = (shift,shift);
 }
 
 
-=head1 METHOD tk_dump;
 
-Extended and moved to the package C<AI::NeuralNet::Kohonen::Demo::RGB>.
+=head1 METHOD load_input
+
+Loads a SOM_PAK-format file of input vectors.
+
+This method is automatically accessed if the constructor is supplied
+with an C<input_file> field.
+
+Requires: a path to a file.
+
+Returns C<undef> on failure.
+
+See L</FILE FORMAT>.
 
 =cut
+
+sub load_input { my ($self,$path) = (shift,shift);
+	local *IN;
+	if (not open IN,$path){
+		warn "Could not open file <$path>: $!";
+		return undef;
+	}
+	@_ = <IN>;
+	close IN;
+	$self->_process_input_text(\@_);
+	return 1;
+}
+
+
+=head1 METHOD save_file
+
+Saves the map file in I<SOM_PAK> format (see L<METHOD load_input>)
+at the path specified in the first argument.
+
+Return C<undef> on failure, a true value on success.
+
+=cut
+
+sub save_file { my ($self,$path) = (shift,shift);
+	local *OUT;
+	if (not open OUT,">$path"){
+		warn "Could not open file for writing <$path>: $!";
+		return undef;
+	}
+	#- Dimensionality of the vectors (integer, compulsory).
+	print OUT ($self->{weight_dim}+1)," ";	# Perl indexing
+	#- Topology type, either hexa or rect (string, optional, case-sensitive).
+	if (not defined $self->{display}){
+		print OUT "rect ";
+	} else { # $self->{display} eq 'hex'
+		print OUT "hexa ";
+	}
+	#- Map dimension in x-direction (integer, optional).
+	print OUT $self->{map_dim_x}." ";
+	#- Map dimension in y-direction (integer, optional).
+	print OUT $self->{map_dim_y}." ";
+	#- Neighborhood type, either bubble or gaussian (string, optional, case-sen- sitive).
+	print OUT "gaussian ";
+	# End of header
+	print OUT "\n";
+
+	# Format input data
+	foreach (@{$self->{input}}){
+		print OUT join("\t",@{$_->{values}});
+		if ($_->{class}){
+			print OUT " $_->{class} " ;
+		}
+		print OUT "\n";
+	}
+	# EOF
+	print OUT chr 26;
+	close OUT;
+	return 1;
+}
+
+
+#
+# Process ASCII from table field or input file
+# Accepts: ASCII as array or array ref
+#
+sub _process_input_text { my ($self) = (shift);
+	if (not defined $_[1]){
+		if (ref $_[0] eq 'ARRAY'){
+			@_ = @{$_[0]};
+		} else {
+			@_ = split/[\n\r\f]+/,$_[0];
+		}
+	}
+	chomp @_;
+	my @specs = split/\s+/,(shift @_);
+	#- Dimensionality of the vectors (integer, compulsory).
+	$self->{weight_dim} = shift @specs;
+	$self->{weight_dim}--; # Perl indexing
+	#- Topology type, either hexa or rect (string, optional, case-sensitive).
+	my $display		    = shift @specs;
+	if (not defined $display and exists $self->{display}){
+		# Intentionally blank
+	} elsif (not defined $display){
+		$self->{display} = undef;
+	} elsif ($display eq 'hexa'){
+		$self->{display} = 'hex'
+	} elsif ($display eq 'rect'){
+		$self->{display} = undef;
+	}
+	#- Map dimension in x-direction (integer, optional).
+	$_				      = shift @specs;
+	$self->{map_dim_x}    = $_ if defined $_;
+	#- Map dimension in y-direction (integer, optional).
+	$_				      = shift @specs;
+	$self->{map_dim_y}    = $_ if defined $_;
+	#- Neighborhood type, either bubble or gaussian (string, optional, case-sen- sitive).
+	# not implimented
+
+	# Format input data
+	foreach (@_){
+		$self->_add_input_from_str($_);
+	}
+	return 1;
+}
 
 
 =head1 PRIVATE METHOD _select_target
@@ -438,7 +641,7 @@ sub _select_target { my $self=shift;
 	}
 	else {
 		$self->{tar}++;
-		if ($self->{tar}>=$#{ $self->{input} }){
+		if ($self->{tar}>$#{ $self->{input} }){
 			$self->{tar} = 0;
 		}
 		return $self->{input}->[$self->{tar}];
@@ -449,9 +652,10 @@ sub _select_target { my $self=shift;
 =head1 PRIVATE METHOD _adjust_neighbours_of
 
 Accepts: a reference to an array containing
-the distance of the BMU from the target, and
-the x and y co-ordinates of the BMU in the map;
-a reference to an array that is the target.
+the distance of the BMU from the target, as well
+as the x and y co-ordinates of the BMU in the map;
+a reference to the target, which is an
+C<AI::NeuralNet::Kohonen::Input> object.
 
 Returns: true.
 
@@ -482,12 +686,14 @@ L<AI::NeuralNet::Kohonen::Node/distance_effect>.
 
 sub _adjust_neighbours_of { my ($self,$bmu,$target) = (shift,shift,shift);
 	my $neighbour_radius = int (
-		($self->{map_dim_a}/2) * exp(- $self->{t} / $self->{time_constant})
+		($self->{map_dim_a}/$self->{neighbour_factor}) * exp(- $self->{t} / $self->{time_constant})
 	);
 
 	# Distance from co-ord vector (0,0) as integer
 	# Basically map_width * y  +  x
 	my $centre = ($self->{map_dim_a}*$bmu->[2])+$bmu->[1];
+	# Set the class of the BMU
+	$self->{map}->[ $bmu->[1] ]->[ $bmu->[2] ]->{class} = $target->{class};
 
 	for my $x ($bmu->[1]-$neighbour_radius .. $bmu->[1]+$neighbour_radius){
 		next if $x<0 or $x>$self->{map_dim_x};		# Ignore those not mappable
@@ -500,10 +706,11 @@ sub _adjust_neighbours_of { my ($self,$bmu,$target) = (shift,shift,shift);
 
 			# Adjust the weight
 			for my $w (0..$self->{weight_dim}){
+				next if $target->{values}->[$w] eq $self->{map}->[$x]->[$y]->{missing_mask};
 				my $weight = \$self->{map}->[$x]->[$y]->{weight}->[$w];
 				$$weight = $$weight + (
 					$self->{map}->[$x]->[$y]->distance_effect($bmu->[0], $neighbour_radius)
-					* ( $self->{l} * ($target->[$w] - $$weight) )
+					* ( $self->{l} * ($target->{values}->[$w] - $$weight) )
 				);
 			}
 		}
@@ -566,8 +773,93 @@ sub _gauss_weight { my ($r, $sigma) = (shift,shift);
 }
 
 
+=head1 PUBLIC METHOD quantise_error
+
+Returns the quantise error for either the supplied points,
+or those in the C<input> field.
+
+=cut
+
+
+sub quantise_error { my ($self,$targets) = (shift,shift);
+	my $qerror=0;
+	if (not defined $targets){
+		$targets = $self->{input};
+	} else {
+		foreach (@$targets){
+			if (not ref $_ or ref $_ ne 'ARRAY'){
+				croak "Supplied target parameter should be an array of arrays!"
+			}
+			$_ = new AI::NeuralNet::Kohonen::Input(values=>$_);
+		}
+	}
+	my @bmu = $_->get_results($targets);
+
+	# Check input and output dims are the same
+	if ($#{$self->{map}->[0]->[1]->{weight}} != $targets->[0]->{dim}){
+		confess "target input and map dimensions differ";
+	}
+
+	for my $i (0..$#bmu){
+		foreach my $w (0..$self->{weight_dim}){
+			$qerror += $targets->[$i]->{values}->[$w]
+			- $self->{map}->[$bmu[$i]->[1]]->[$bmu[$i]->[2]]->{weight}->[$w];
+		}
+	}
+	$qerror /= scalar @$targets;
+	return $qerror;
+}
+
+
+=head1 PRIVATE METHOD _add_input_from_str
+
+Adds to the C<input> field an input vector in SOM_PAK-format
+whitespace-delimited ASCII.
+
+Returns C<undef> on failure to add an item (perhaps because
+the data passed was a comment, or the C<weight_dim> flag was
+not set); a true value on success.
+
+=cut
+
+sub _add_input_from_str { my ($self) = (shift);
+	$_ = shift;
+	s/#.*$//g;
+	return undef if /^$/ or not defined $self->{weight_dim};
+	my @i = split /\s+/,$_;
+	# 'x' in files signifies unknown: we prefer undef
+#	@i[0..$self->{weight_dim}] = map{
+#		$_ eq 'x'? undef:$_
+#	} @i[0..$self->{weight_dim}];
+	my %args = (
+		dim 	=> $self->{weight_dim},
+		values	=> [ @i[0..$self->{weight_dim}] ],
+	);
+	$args{class} = $i[$self->{weight_dim}+1] if $i[$self->{weight_dim}+1];
+	$args{enhance} = $i[$self->{weight_dim}+1] if $i[$self->{weight_dim}+2];
+	$args{fixed} = $i[$self->{weight_dim}+1] if $i[$self->{weight_dim}+3];
+	push @{$self->{input}}, new AI::NeuralNet::Kohonen::Input(%args);
+
+	return 1;
+}
+
+
+#
+# Processes the 'table' paramter to the constructor
+#
+sub _process_table { my $self = shift;
+	$_ = $self->_process_input_text( $self->{table} );
+	undef $self->{table};
+	return $_;
+}
+
+
+__END__
+1;
+
 =head1 FILE FORMAT
 
+This module has begun to attempt the I<SOM_PAK> format:
 I<SOM_PAK> file format version 3.1 (April 7, 1995),
 Helsinki University of Technology, Espoo:
 
@@ -600,116 +892,67 @@ If some components of some data vectors are missing (due to data
 collection failures or any other reason) those components should be
 marked with 'x'...[in processing, these] are ignored.
 
+...
+
+Each data line may have two optional qualifiers that determine the
+usage of the data entry during training. The qualifiers are of the
+form codeword=value, where spaces are not allowed between the parts of
+the qualifier. The optional qualifiers are the following:
+
+=over 4
+
+=item -
+
+Enhancement factor: e.g. weight=3.  The training rate for the
+corresponding input pattern vector is multiplied by this
+parameter so that the reference vectors are updated as if this
+input vector were repeated 3 times during training (i.e., as if
+the same vector had been stored 2 extra times in the data file).
+
+=item -
+
+Fixed-point qualifier: e.g. fixed=2,5.  The map unit defined by
+the fixed-point coordinates (x = 2; y = 5) is selected instead of
+the best-matching unit for training. (See below for the definition
+of coordinates over the map.) If several inputs are forced to
+known locations, a wanted orientation results in the map.
+
 =back
 
-Not implimented (yet):
+=back
 
-	I<neighbourhood type>, which is always gaussian.
+Not (yet) implimented:
+
+	hexa/rect is only visual, and only in the ::Demo::RGB package atm
+	I<neighbourhood type> is always gaussian.
 	i<x> for missing data.
-	class labels
 	the two optional qualifiers
 
+=head1 DEPRACATED METHOS
+
+=over 4
+
+=item PRIVATE METHOD _find_bmu
+
+Has become the public method, C<find_bmu>.
+
+=cut
+
+sub _find_bmu { return find_bmu(@_) }
+
+=item METHOD tk_dump;
+
+Extended and moved to the package C<AI::NeuralNet::Kohonen::Demo::RGB>.
+
 =back
-
-Requires: a path to a file.
-
-Returns C<undef> on failure.
-
-=cut
-
-sub load_file { my ($self,$path) = (shift,shift);
-	local *IN;
-	if (not open IN,$path){
-		warn "Could not open file <$path>: $!";
-		return undef;
-	}
-	@_ = <IN>;
-	close IN;
-	chomp @_;
-	my @specs = split/\s+/,(shift @_);
-	#- Dimensionality of the vectors (integer, compulsory).
-	$self->{weight_dim} = shift @specs;
-	$self->{weight_dim}--; # Perl indexing
-	#- Topology type, either hexa or rect (string, optional, case-sensitive).
-	$self->{display}    = shift @specs;
-	if (not defined $self->{display}){
-
-	} elsif ($self->{display} eq 'hexa'){
-		$self->{display} = 'hex'
-	} elsif ($self->{display} eq 'rect'){
-		$self->{display} = undef;
-	} else {
-		warn "Unknown display option '$self->{display}' in file <$path> - defaulting.";
-		$self->{display} = undef;
-	}
-	#- Map dimension in x-direction (integer, optional).
-	$self->{map_dim_x}    = shift @specs;
-	#- Map dimension in y-direction (integer, optional).
-	$self->{map_dim_y}    = shift @specs;
-	#- Neighborhood type, either bubble or gaussian (string, optional, case-sen- sitive).
-	# not implimented
-
-	# Format input data
-	foreach (@_){
-		s/#.*$//g;
-		next if /^$/;
-		my @i = split /\s+/;
-		push @{$self->{input}}, \@i;
-	}
-	return 1;
-}
-
-=head1 METHOD save_file
-
-Saves the map file in I<SOM_PAK> format (see L<METHOD load_file>)
-at the path specified in the first argument.
-
-Return C<undef> on failure, a true value on success.
-
-=cut
-
-sub save_file { my ($self,$path) = (shift,shift);
-	local *OUT;
-	if (not open OUT,">$path"){
-		warn "Could not open file for writing <$path>: $!";
-		return undef;
-	}
-	#- Dimensionality of the vectors (integer, compulsory).
-	print OUT ($self->{weight_dim}+1)," ";	# Perl indexing
-	#- Topology type, either hexa or rect (string, optional, case-sensitive).
-	if (not defined $self->{display}){
-		print OUT "rect ";
-	} else { # $self->{display} eq 'hex'
-		print OUT "hexa ";
-	}
-	#- Map dimension in x-direction (integer, optional).
-	print OUT $self->{map_dim_x}." ";
-	#- Map dimension in y-direction (integer, optional).
-	print OUT $self->{map_dim_y}." ";
-	#- Neighborhood type, either bubble or gaussian (string, optional, case-sen- sitive).
-	print OUT "gaussian ";
-	# End of header
-	print OUT "\n";
-
-	# Format input data
-	foreach (@{$self->{input}}){
-		print OUT join("\t",@$_),"\n";
-	}
-	# EOF
-	print OUT chr 26;
-	close OUT;
-	return 1;
-}
-
-
-__END__
-1;
-
 
 =head1 SEE ALSO
 
 See L<AI::NeuralNet::Kohonen::Node/distance_from>;
 L<AI::NeuralNet::Kohonen::Demo::RGB>.
+
+L<The documentation for C<SOM_PAK>|ftp://cochlea.hut.fi/pub/som_pak>,
+which has lots of advice on map building that may or may not be applicable yet.
 
 A very nice explanation of Kohonen's algorithm:
 L<AI-Junkie SOM tutorial part 1|http://www.fup.btinternet.co.uk/aijunkie/som1.html>

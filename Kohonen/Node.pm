@@ -1,7 +1,7 @@
 package AI::NeuralNet::Kohonen::Node;
 
 use vars qw/$VERSION $TRACE/;
-$VERSION = 0.1;
+$VERSION = 0.11;	# 16 April 2003 POD
 $TRACE = 1;
 
 =head1 NAME
@@ -21,6 +21,10 @@ use Carp qw/cluck carp confess croak/;
 
 =head1 CONSTRUCTOR (new)
 
+Returns a new C<Node> object. If no wieghts
+are supplied, the node's weights are randomized
+with real nubmers.
+
 =over 4
 
 =item dim
@@ -34,6 +38,14 @@ Optional: a reference to an array containing the
 weight for this node. Supplying this allows the
 constructor to work out C<dim>, above.
 
+=item values
+
+The values of the vector. Use C<x> for unknown values.
+
+=item missing_mask
+
+Used to donate missing input in the node. Default is C<x>.
+
 =back
 
 =cut
@@ -42,6 +54,7 @@ sub new {
 	my $class	= shift;
 	my %args	= @_;
 	my $self 	= bless \%args,$class;
+	$self->{missing_mask} = 'x' unless defined $self->{missing_mask};
 	if (not defined $self->{weight}){
 		if (not defined $self->{dim}){
 			cluck "No {dim} or {weight}!";
@@ -52,7 +65,7 @@ sub new {
 			$self->{weight}->[$w] = rand;
 		}
 	} elsif (not ref $self->{weight} or ref $self->{weight} ne 'ARRAY') {
-		warn "{weight} should be an array reference!";
+		cluck "{weight} should be an array reference!";
 		return undef;
 	} else {
 		$self->{dim} = $#{$self->{weight}};
@@ -79,18 +92,22 @@ C<W> is this node's weight vector.
 
 =cut
 
-sub distance_from { my ($self) = (shift);
-	if (not $_[0] or not ref $_[0] or ref $_[0] ne 'ARRAY'){
-		croak "distance_from requires a target array!";
+sub distance_from { my ($self,$target) = (shift,shift);
+	if (not defined $target or not ref $target or ref $target ne 'AI::NeuralNet::Kohonen::Input'){
+		cluck "distance_from requires a target ::Input object!";
+		return undef;
 	}
-	my @target = @{$_[0]};
-	if ($#target != $self->{dim}){
-		croak "distance_from requires its target array dim match {dim}!\n"
-		."(".($#target)." v {".$self->{dim}."} ) ";
+	if ($#{$target->{values}} != $self->{dim}){
+		croak "distance_from requires the target's {value} field dim match its own {dim}!\n"
+		."(".($#{$target->{values}})." v {".$self->{dim}."} ) ";
 	}
 	my $distance = 0;
 	for (my $i=0; $i<=$self->{dim}; ++$i){
-		$distance += (($target[$i]-$self->{weight}->[$i]) * ($target[$i]-$self->{weight}->[$i]));
+		next if $target->{values}->[$i] eq $self->{missing_mask};
+		$distance += (
+			( $target->{values}->[$i] - $self->{weight}->[$i] )
+		  * ( $target->{values}->[$i] - $self->{weight}->[$i] )
+		);
 	}
 	return sqrt($distance);
 }
@@ -113,13 +130,12 @@ Returns:
 	               (          2    )
 	               (   2 sigma (t) )
 
-Where C<distance> is the distance of the node from the BMU
-(that is, C<$bmu-E<gt>[0]> in the method's paramter),
+Where C<distance> is the distance of the node from the BMU,
 and C<sigma> is the width of the neighbourhood as calculated
-above (see L<FINDING THE NEIGHBOURS OF THE BMU>). THETA also
+elsewhere (see L<AI::NeuralNet::Kohonen/FINDING THE NEIGHBOURS OF THE BMU>). THETA also
 decays over time.
 
-The time C<t> is always that of the calling object.
+The time C<t> is always that of the calling object, and is not referenced here.
 
 =cut
 
@@ -131,6 +147,10 @@ sub distance_effect { my ($self,$distance,$sigma) = (shift,shift,shift);
 1;
 
 __END__
+
+=head1 SEE ALSO
+
+The L<AI::NeuralNet::Kohonen>.
 
 =head1 AUTHOR AND COYRIGHT
 

@@ -1,6 +1,7 @@
 Changes
 Kohonen.pm
 Kohonen/Node.pm
+Kohonen/Input.pm
 MANIFEST
 Makefile.PL
 README

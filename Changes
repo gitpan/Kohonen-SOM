@@ -1,5 +1,17 @@
 Revision history for Perl extension AI::NeuralNet::Kohonen.
 
+0.132  Web Apr 17 11:40:00 2003
+	Some minor interface changes.
+	Created *::Input class
+
+0.0131 Thu Mar 20 11:55:00 2003
+	Added epoch_start callback.
+
+0.013 Mon Mar 17 14:49:00 2003
+	Added 'neighbour_factor' field
+	Method 'load_file' becomes 'load_input', as we may allow
+	the loading of map fiels too.
+
 0.012 Fri Mar 14 11:49:00 2003
 	Added some support for loading and saving in SOM_PAK file
 	format; gaussian smoothing of the map.
