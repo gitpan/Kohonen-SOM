@@ -1,7 +1,7 @@
 package AI::NeuralNet::Kohonen;
 
 use vars qw/$VERSION $TRACE/;
-$VERSION = 0.1;
+$VERSION = 0.11;	# 13 March 2003
 $TRACE = 1;
 
 =head1 NAME
@@ -12,16 +12,17 @@ AI::NeuralNet::Kohonen - Kohonen's Self-organising Maps
 
 use strict;
 use warnings;
-use Carp qw/croak cluck carp confess/;
+use Carp qw/croak cluck/;
 
 use AI::NeuralNet::Kohonen::Node;
 
 =head1 SYNOPSIS
 
 	$_ = AI::NeuralNet::Kohonen->new(
-		map_dim	=> 39,
-		epochs => 100,
-		table=>
+		map_dim_x => 39,
+		map_dim_y => 19,
+		epochs    => 100,
+		table     =>
 	"R G B
 	1 0 0
 	0 1 0
@@ -54,6 +55,15 @@ Have a look at L<AI::NeuralNet::Kohonen::Demo::RGB>.
 
 I'll add some more text here later.
 
+
+=head1 DEPENDENCIES
+
+None
+
+=head1 EXPORTS
+
+None
+
 =head1 CONSTRUCTOR new
 
 Sets up object fields:
@@ -80,10 +90,12 @@ See also C<input>.
 
 A name for each dimension of the input vectors.
 
-=item map_dim
+=item map_dim_x
 
-The size of one dimension of the feature map to create - defaults to a toy 19.
-(note: this is Perl indexing).
+=item map_dim_y
+
+The dimensions of the feature map to create - defaults to a toy 19.
+(note: this is Perl indexing, starting at zero).
 
 =item epochs
 
@@ -124,6 +136,10 @@ The current epoch, or moment in time.
 
 The current learning rate.
 
+=item map_dim_a
+
+Average of the map dimensions.
+
 =back
 
 =cut
@@ -138,9 +154,19 @@ sub new {
 		return undef;
 	}
 	$self->{weight_dim}		= $#{$self->{input}->[0]};
-	$self->{map_dim}		= 19 unless defined $self->{map_dim};
+	$self->{map_dim_x}		= 19 unless defined $self->{map_dim_x};
+	$self->{map_dim_y}		= 19 unless defined $self->{map_dim_y};
+	# Legacy from...yesterday
+	if ($self->{map_dim}){
+		$self->{map_dim_x} = $self->{map_dim_y} = $self->{map_dim}
+	}
+	if ($self->{map_dim_x}>$self->{map_dim_y}){
+		$self->{map_dim_a} = $self->{map_dim_y} + (($self->{map_dim_x}-$self->{map_dim_y})/2)
+	} else {
+		$self->{map_dim_a} = $self->{map_dim_x} + (($self->{map_dim_y}-$self->{map_dim_x})/2)
+	}
 	$self->{epochs}			= 99 unless defined $self->{epochs};
-	$self->{time_constant}	= $self->{epochs} / log($self->{map_dim});	# to base 10?
+	$self->{time_constant}	= $self->{epochs} / log($self->{map_dim_a});	# to base 10?
 	$self->{learning_rate}	= 0.5 unless $self->{learning_rate};
 	$self->{l}				= $self->{learning_rate};
 	$self->_create_map;
@@ -171,10 +197,11 @@ sub _process_table { my $self = shift;
 #
 sub _create_map { my $self=shift;
 	croak "{weight_dim} not set" unless $self->{weight_dim};
-	croak "{map_dim} not set" unless $self->{map_dim};
-	for my $x (0..$self->{map_dim}){
+	croak "{map_dim_x} not set" unless $self->{map_dim_x};
+	croak "{map_dim_y} not set" unless $self->{map_dim_y};
+	for my $x (0..$self->{map_dim_x}){
 		$self->{map}->[$x] = [];
-		for my $y (0..$self->{map_dim}){
+		for my $y (0..$self->{map_dim_y}){
 			$self->{map}->[$x]->[$y] = new AI::NeuralNet::Kohonen::Node(
 				dim => $self->{weight_dim}
 			);
@@ -203,13 +230,106 @@ sub train { my ($self,$epochs) = (shift,shift);
 	for my $epoch (0..$epochs){
 		$self->{t} = $epoch;
 		my $target = $self->_select_target;
-		my $bmu = $self->_find_bmu($target);
+		my $bmu = $self->find_bmu($target);
 		$self->_adjust_neighbours_of($bmu,$target);
 		$self->_decay_learning_rate;
 		&{$self->{epoch_end}} if exists $self->{epoch_end};
 	}
 	&{$self->{train_end}} if $self->{train_end};
 	return 1;
+}
+
+
+=head1 METHOD find_bmu
+
+Find the Best Matching Unit in the map and return the x/y index.
+
+Accepts: a reference to an array that is the target.
+
+Returns: a reference to an array that is the BMU (and should
+perhaps be abstracted as an object in its own right), indexed as follows:
+
+=over 4
+
+=item 0
+
+euclidean distance from the supplied target
+
+=item 1
+
+I<x> co-ordinate in the map
+
+=item 2
+
+I<y> co-ordinate in the map
+
+=back
+
+See L</METHOD get_weight_at>,
+and L<AI::NeuralNet::Kohonen::Node/distance_from>,
+
+=cut
+
+
+sub find_bmu { my ($self,$target) = (shift,shift);
+	my $closest = [];	# [value, x,y] value and co-ords of closest match
+	for my $x (0..$self->{map_dim_x}){
+		for my $y (0..$self->{map_dim_y}){
+			my $distance = $self->{map}->[$x]->[$y]->distance_from( $target );
+			$closest = [$distance,0,0] if $x==0 and $y==0;
+			$closest = [$distance,$x,$y] if $distance < $closest->[0];
+		}
+	}
+	return $closest;
+}
+
+=head1 METHOD get_weight_at
+
+Returns a reference to the weight array at the supplied I<x>,I<y>
+co-ordinates.
+
+Accepts: I<x>,I<y> co-ordinates, each a scalar.
+
+Returns: reference to an array that is the weight of the node, or
+C<undef> on failure.
+
+=cut
+
+sub get_weight_at { my ($self,$x,$y) = (shift,shift,shift);
+	return undef if $x<0 or $y<0 or $x>$self->{map_dim_x} or $y>$self->{map_dim_y};
+	return $self->{map}->[$x]->[$y]->{weight};
+}
+
+=head1 PRIVATE METHOD find_bmu
+
+Depreciated - should have been public to begin with.
+
+=cut
+
+sub _find_bmu { return find_bmu(@_) }
+
+
+=head1 METHOD get_results
+
+Finds and returns the results for all input vectors (C<input>),
+placing the values in the array reference that is the C<results>
+field, and, depending on calling context, returning it either as
+an array or as it is.
+
+Individual results are in the array format as described in
+L<METHOD find_bmu>.
+
+See L<METHOD find_bmu>, and L</METHOD get_weight_at>.
+
+
+=cut
+
+sub get_results { my $self=shift;
+	$self->{results} = [];
+	foreach my $target (@{ $self->{input} }){
+		push @{$self->{results}}, $self->find_bmu($target);
+	}
+	return wantarray? @{$self->{results}} : $self->{results};
 }
 
 
@@ -221,14 +341,14 @@ Print the current weight values to the screen.
 
 sub dump { my $self=shift;
 	print "    ";
-	for my $x (0..$self->{map_dim}){
+	for my $x (0..$self->{map_dim_x}){
 		printf ("  %02d ",$x);
 	}
 	print"\n","-"x107,"\n";
-	for my $x (0..$self->{map_dim}){
+	for my $x (0..$self->{map_dim_x}){
 		for my $w (0..$self->{weight_dim}){
 			printf ("%02d | ",$x);
-			for my $y (0..$self->{map_dim}){
+			for my $y (0..$self->{map_dim_y}){
 				printf("%.2f ", $self->{map}->[$x]->[$y]->{weight}->[$w]);
 			}
 			print "\n";
@@ -246,22 +366,21 @@ Dumps the weights to a TK screen.
 
 sub tk_dump { my $self=shift;
 	$self->{display_scale} = 10;
-	my $size = $self->{map_dim} * $self->{display_scale};
 	eval "
 		use Tk;
 		use Tk::Canvas;
 	";
 	my $mw = MainWindow->new(
-		-width	=> ($size+200),
-		-height	=> ($size+200),
+		-width	=> ($self->{map_dim_x} * $self->{display_scale})+100,
+		-height	=> ($self->{map_dim_y} * $self->{display_scale})+100,
 	);
 	my $c = $mw->Canvas(
-		-width	=> $size+100,
-		-height	=> $size+100,
+		-width	=> ($self->{map_dim_x} * $self->{display_scale})+50,
+		-height	=> ($self->{map_dim_y} * $self->{display_scale})+50,
 	);
 
-	for my $x (0..$self->{map_dim}){
-		for my $y (0..$self->{map_dim}){
+	for my $x (0..$self->{map_dim_x}){
+		for my $y (0..$self->{map_dim_y}){
 			my $colour = sprintf("#%02x%02x%02x",
 				(int (255 * $self->{map}->[$x]->[$y]->{weight}->[0])),
 				(int (255 * $self->{map}->[$x]->[$y]->{weight}->[1])),
@@ -300,32 +419,6 @@ sub _select_target { my $self=shift;
 }
 
 
-=head1 PRIVATE METHOD _find_bmu
-
-Find the Best Matching Unit in the map and return the x/y index.
-
-Accepts: a reference to an array that is the target.
-
-Returns: a reference to an array that is the BMU, of the format
-
-	[euclidean-distance-from-target, our-x-co-ord, our-y-co-ord]
-
-See L<AI::NeuralNet::Kohonen::Node/distance_from>.
-
-=cut
-
-sub _find_bmu { my ($self,$target) = (shift,shift);
-	my $closest = [];	# [value, x,y] value and co-ords of closest match
-	for my $x (0..$self->{map_dim}){
-		for my $y (0..$self->{map_dim}){
-			my $distance = $self->{map}->[$x]->[$y]->distance_from( $target );
-			$closest = [$distance,0,0] if $x==0 and $y==0;
-			$closest = [$distance,$x,$y] if $distance < $closest->[0];
-		}
-	}
-	return $closest;
-}
-
 
 =head1 PRIVATE METHOD _adjust_neighbours_of
 
@@ -363,16 +456,16 @@ L<AI::NeuralNet::Kohonen::Node/distance_effect>.
 
 sub _adjust_neighbours_of { my ($self,$bmu,$target) = (shift,shift,shift);
 	my $neighbour_radius = int (
-		($self->{map_dim}/2) * exp(- $self->{t} / $self->{time_constant})
+		($self->{map_dim_a}/2) * exp(- $self->{t} / $self->{time_constant})
 	);
 	# Distance from co-ord vector (0,0) as integer
 	# Basically map_width * y  +  x
-	my $centre = ($self->{map_dim}*$bmu->[2])+$bmu->[1];
+	my $centre = ($self->{map_dim_a}*$bmu->[2])+$bmu->[1];
 
 	for my $x ($bmu->[1]-$neighbour_radius .. $bmu->[1]+$neighbour_radius){
-		next if $x<0 or $x>$self->{map_dim};		# Ignore those not mappable
+		next if $x<0 or $x>$self->{map_dim_x};		# Ignore those not mappable
 		for my $y ($bmu->[2]-$neighbour_radius .. $bmu->[2]+$neighbour_radius){
-			next if $y<0 or $y>$self->{map_dim};	# Ignore those not mappable
+			next if $y<0 or $y>$self->{map_dim_y};	# Ignore those not mappable
 			# Skip node if it is out of the circle of influence
 			next if (
 				(($bmu->[1] - $x) * ($bmu->[1] - $x)) + (($bmu->[2] - $y) * ($bmu->[2] - $y))
@@ -397,9 +490,9 @@ sub SQUARE_adjust_neighbours_of { my ($self,$bmu,$target) = (shift,shift,shift);
 		($self->{map_dim}/2) * exp(- $self->{t} / $self->{time_constant})
 	);
 	for my $x ($bmu->[1]-$neighbour_radius .. $bmu->[1]+$neighbour_radius){
-		next if $x<0 or $x>$self->{map_dim};
+		next if $x<0 or $x>$self->{map_dim_x};
 		for my $y ($bmu->[2]-$neighbour_radius .. $bmu->[2]+$neighbour_radius){
-			next if $y<0 or $y>$self->{map_dim};
+			next if $y<0 or $y>$self->{map_dim_y};
 			# Adjust the weight
 			for my $w (0..$self->{weight_dim}){
 				my $weight = \$self->{map}->[$x]->[$y]->{weight}->[$w];

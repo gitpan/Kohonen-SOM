@@ -1,5 +1,9 @@
 Revision history for Perl extension AI::NeuralNet::Kohonen.
 
+0.011 Thu Mar 13 14:00:01 2003
+	Had forgotten to make the find_bmu method public.
+	Allowed for rectangular maps rather than just square.
+
 0.01  Thu Mar 13 12:32:00 2003
 	- original version; created by h2xs 1.21 with options
 		-X -n AI::NeuralNet::Kohonen
