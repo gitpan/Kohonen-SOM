@@ -1,7 +1,7 @@
 package AI::NeuralNet::Kohonen;
 
 use vars qw/$VERSION/;
-$VERSION = 0.132;	# 16 April 2003 - deprecated syntax fix
+$VERSION = 0.133;	# 18 April 2003 updated test for new mechanisms
 
 =head1 NAME
 
@@ -103,6 +103,7 @@ The dimensions of the feature map to create - defaults to a toy 19.
 =item epochs
 
 Number of epochs to run for (see L<METHOD train>).
+Minimum number is C<1>.
 
 =item learning_rate
 
@@ -204,6 +205,7 @@ sub new {
 	}
 	$self->{neighbour_factor}	= 2.5 unless $self->{neighbour_factor};
 	$self->{epochs}				= 99 unless defined $self->{epochs};
+	$self->{epochs}				= 1 if $self->{epochs}<1;
 	$self->{time_constant}		= $self->{epochs} / log($self->{map_dim_a}) unless $self->{time_constant};	# to base 10?
 	$self->{learning_rate}		= 0.5 unless $self->{learning_rate};
 	$self->{l}					= $self->{learning_rate};
@@ -311,7 +313,7 @@ Returns a true value.
 sub train { my ($self,$epochs) = (shift,shift);
 	$epochs = $self->{epochs} unless defined $epochs;
 	&{$self->{train_start}} if exists $self->{train_start};
-	for my $epoch (0..$epochs){
+	for my $epoch (1..$epochs){
 		$self->{t} = $epoch;
 		&{$self->{epoch_start}} if exists $self->{epoch_start};
 		for (0..$#{$self->{input}}){
@@ -420,9 +422,9 @@ sub get_results { my ($self,$targets)=(shift,shift);
 		push @{$self->{results}}, $_;
 	}
 	# Make it a scalar if it's a scalar
-	if ($#{$self->{results}} == 0){
-		$self->{results} = @{$self->{results}}[0];
-	}
+#	if ($#{$self->{results}} == 0){
+#		$self->{results} = @{$self->{results}}[0];
+#	}
 	return wantarray? @{$self->{results}} : $self->{results};
 }
 
@@ -793,7 +795,10 @@ sub quantise_error { my ($self,$targets) = (shift,shift);
 			$_ = new AI::NeuralNet::Kohonen::Input(values=>$_);
 		}
 	}
-	my @bmu = $_->get_results($targets);
+
+	# Recieves an array of ONE element,
+	# should be an array of an array of elements
+	my @bmu = $self->get_results($targets);
 
 	# Check input and output dims are the same
 	if ($#{$self->{map}->[0]->[1]->{weight}} != $targets->[0]->{dim}){
@@ -827,7 +832,8 @@ sub _add_input_from_str { my ($self) = (shift);
 	s/#.*$//g;
 	return undef if /^$/ or not defined $self->{weight_dim};
 	my @i = split /\s+/,$_;
-	# 'x' in files signifies unknown: we prefer undef
+	return undef if $#i < $self->{weight_dim}; # catch bad lines
+	# 'x' in files signifies unknown: we prefer undef?
 #	@i[0..$self->{weight_dim}] = map{
 #		$_ eq 'x'? undef:$_
 #	} @i[0..$self->{weight_dim}];
