@@ -1,7 +1,7 @@
 package AI::NeuralNet::Kohonen;
 
 use vars qw/$VERSION/;
-$VERSION = 0.133;	# 18 April 2003 updated test for new mechanisms
+$VERSION = 0.14;	# 05 May 2006 POD
 
 =head1 NAME
 
@@ -23,15 +23,15 @@ use AI::NeuralNet::Kohonen::Input;
 		map_dim_y => 19,
 		epochs    => 100,
 		table     =>
-	"R G B
-	1 0 0
-	0 1 0
-	0 0 1
-	1 1 0
-	1 0 1
-	0 1 1
-	1 1 1
-	");
+	"3
+	1 0 0 red
+	0 1 0 yellow
+	0 0 1 blue
+	0 1 1 cyan
+	1 1 0 yellow
+	1 .5 0 orange
+	1 .5 1 pink"
+	);
 
 	$_->train;
 	$_->save_file('mydata.txt');
@@ -45,10 +45,7 @@ in Perl. It's not fast - it's illustrative. In fact, it's slow: but it is illust
 Have a look at L<AI::NeuralNet::Kohonen::Demo::RGB> for an example of
 visualisation of the map.
 
-This module has not yet been tested for accuracy, and should be
-considered alpha - everything may change.
-
-I'll add some more text here later.
+I'll maybe add some more text here later.
 
 =head1 DEPENDENCIES
 
@@ -58,7 +55,6 @@ I'll add some more text here later.
 =head1 EXPORTS
 
 None
-
 
 =head1 CONSTRUCTOR new
 
@@ -927,30 +923,29 @@ known locations, a wanted orientation results in the map.
 
 =back
 
-Not (yet) implimented:
-
-	hexa/rect is only visual, and only in the ::Demo::RGB package atm
-	I<neighbourhood type> is always gaussian.
-	i<x> for missing data.
-	the two optional qualifiers
-
-=head1 DEPRACATED METHOS
+Not (yet) implimented in file format:
 
 =over 4
 
-=item PRIVATE METHOD _find_bmu
+=item *
 
-Has become the public method, C<find_bmu>.
+hexa/rect is only visual, and only in the ::Demo::RGB package atm
 
-=cut
+=item *
 
-sub _find_bmu { return find_bmu(@_) }
+I<neighbourhood type> is always gaussian.
 
-=item METHOD tk_dump;
+=item *
 
-Extended and moved to the package C<AI::NeuralNet::Kohonen::Demo::RGB>.
+i<x> for missing data.
+
+=item *
+
+the two optional qualifiers
 
 =back
+
+=cut
 
 =head1 SEE ALSO
 
@@ -965,7 +960,7 @@ L<AI-Junkie SOM tutorial part 1|http://www.fup.btinternet.co.uk/aijunkie/som1.ht
 
 =head1 AUTHOR AND COYRIGHT
 
-This implimentation Copyright (C) Lee Goddard, 2003.
+This implimentation Copyright (C) Lee Goddard, 2003-2006.
 All Rights Reserved.
 
 Available under the same terms as Perl itself.

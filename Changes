@@ -1,5 +1,9 @@
 Revision history for Perl extension AI::NeuralNet::Kohonen.
 
+0.14	Fri May 05 20:19:00 2006 
+	Updated SYNOPSIS from ::Visual code, and a minor bug:
+	thanks to diligent eye of Przemek Blaskiewicz
+	
 0.132  Web Apr 17 11:40:00 2003
 	Some minor interface changes.
 	Created *::Input class

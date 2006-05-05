@@ -6,7 +6,7 @@ WriteMakefile(
 	'ABSTRACT'	=> "Kohonen's Self-organising Feature Maps, slowly...",
 
     'NAME'		=> 'AI::NeuralNet::Kohonen',
-    'VERSION_FROM'	=> 'Kohonen.pm', # finds $VERSION
+    'VERSION_FROM'	=> 'AI/NeuralNet/Kohonen.pm', # finds $VERSION
     'PREREQ_PM'		=> {}, # e.g., Module::Name => 1.1
     ($] >= 5.005 ?    ## Add these new keywords supported since 5.005
       (AUTHOR     => 'Lee Goddard <lgoddard -at- cpan -dot- org>') : ()),

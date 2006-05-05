@@ -1,9 +1,10 @@
 Changes
-Kohonen.pm
-Kohonen/Node.pm
-Kohonen/Input.pm
+AI/NeuralNet/Kohonen.pm
+AI/NeuralNet/Kohonen/Node.pm
+AI/NeuralNet/Kohonen/Input.pm
 MANIFEST
 Makefile.PL
 README
 ex.dat
 test.pl
+META.yml                                 Module meta-data (added by MakeMaker)
